@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
 
-#  Copyright (C) 2013 - Jesús Barbero Rodríguez
+#    Gedit smartbox plugin
+#    Copyright (C) 2011  Jesús Barbero Rodríguez <chuchiperriman@gmail.com>
 #
-#  This program is free software; you can redistribute it and/or modify
-#  it under the terms of the GNU General Public License as published by
-#  the Free Software Foundation; either version 2 of the License, or
-#  (at your option) any later version.
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
 #
-#  This program is distributed in the hope that it will be useful,
-#  but WITHOUT ANY WARRANTY; without even the implied warranty of
-#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-#  GNU General Public License for more details.
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
 #
-#  You should have received a copy of the GNU General Public License
-#  along with this program; if not, write to the Free Software
-#  Foundation, Inc., 59 Temple Place, Suite 330,
-#  Boston, MA 02111-1307, USA.
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 import os
 import functools
@@ -26,25 +26,19 @@ import xml.sax.saxutils
 class Popup(Gtk.Dialog):
     __gtype_name__ = "SmartBoxPopup"
 
-    def __init__(self, window):
+    def __init__(self, window, manager):
         Gtk.Dialog.__init__(self,
                     title=_('Smart Box'),
                     parent=window,
                     flags=Gtk.DialogFlags.DESTROY_WITH_PARENT | Gtk.DialogFlags.MODAL,
-                    buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL))
+                    buttons=None)
 
-        self._open_button = self.add_button(Gtk.STOCK_OPEN, Gtk.ResponseType.ACCEPT)
-
+        self.manager = manager
+        
         self._build_ui()
 
         self._size = (0, 0)
-        self._dirs = []
-        self._cache = {}
-        self._theme = None
         self._cursor = None
-        self._shift_start = None
-
-        self._busy_cursor = Gdk.Cursor(Gdk.CursorType.WATCH)
 
         accel_group = Gtk.AccelGroup()
         accel_group.connect(Gdk.KEY_l, Gdk.ModifierType.CONTROL_MASK, 0, self.on_focus_entry)
@@ -57,7 +51,7 @@ class Popup(Gtk.Dialog):
         return self._size
 
     def _build_ui(self):
-        self.set_border_width(5)
+        self.set_border_width(2)
         vbox = self.get_content_area()
         vbox.set_spacing(2)
         action_area = self.get_action_area()
@@ -77,7 +71,7 @@ class Popup(Gtk.Dialog):
         tv = Gtk.TreeView()
         tv.set_headers_visible(False)
 
-        self._store = Gtk.ListStore(Gio.Icon, str, GObject.Object, Gio.FileType)
+        self._store = Gtk.ListStore(Gio.Icon, str, GObject.Object)
         tv.set_model(self._store)
 
         self._treeview = tv
@@ -98,22 +92,9 @@ class Popup(Gtk.Dialog):
         tv.append_column(column)
         sw.add(tv)
 
-        selection = tv.get_selection()
-        selection.connect('changed', self.on_selection_changed)
-        selection.set_mode(Gtk.SelectionMode.MULTIPLE)
-
         vbox.pack_start(self._entry, False, False, 0)
         vbox.pack_start(sw, True, True, 0)
 
-        lbl = Gtk.Label()
-        lbl.set_halign(Gtk.Align.START)
-        lbl.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
-        self._info_label = lbl
-
-        vbox.pack_start(lbl, False, False, 0)
-
-        # Initial selection
-        self.on_selection_changed(tv.get_selection())
         vbox.show_all()
 
     def on_cell_data_cb(self, column, cell, model, piter, user_data):
@@ -135,36 +116,6 @@ class Popup(Gtk.Dialog):
         pixbuf = theme.load_icon(stock, size[0], Gtk.IconLookupFlags.USE_BUILTIN)
 
         return pixbuf
-
-    def _list_dir(self, gfile):
-        entries = []
-
-        try:
-            ret = gfile.enumerate_children("standard::*", Gio.FileQueryInfoFlags.NONE, None)
-        except GObject.Error as e:
-            pass
-
-        if isinstance(ret, Gio.FileEnumerator):
-            while True:
-                entry = ret.next_file(None)
-
-                if not entry:
-                    break
-
-                if not entry.get_is_backup():
-                    entries.append((gfile.get_child(entry.get_name()), entry))
-        else:
-            entries = ret
-
-        children = []
-
-        for entry in entries:
-            children.append((entry[0],
-                             entry[1].get_name(),
-                             entry[1].get_file_type(),
-                             entry[1].get_icon()))
-
-        return children
 
     def _compare_entries(self, a, b, lpart):
         if lpart in a:
@@ -188,48 +139,6 @@ class Popup(Gtk.Dialog):
 
         return fnmatch.fnmatch(s, glob)
 
-    def do_search_dir(self, parts, d):
-        if not parts or not d:
-            return []
-
-        if d in self._cache:
-            entries = self._cache[d]
-        else:
-            entries = self._list_dir(d)
-            entries.sort(key=lambda x: x[1].lower())
-            self._cache[d] = entries
-
-        found = []
-        newdirs = []
-
-        lpart = parts[0].lower()
-
-        for entry in entries:
-            if not entry:
-                continue
-
-            lentry = entry[1].lower()
-
-            if not lpart or lpart in lentry or self._match_glob(lentry, lpart):
-                if entry[2] == Gio.FileType.DIRECTORY:
-                    if len(parts) > 1:
-                        newdirs.append(entry[0])
-                    else:
-                        found.append(entry)
-                elif entry[2] == Gio.FileType.REGULAR and \
-                     (not lpart or len(parts) == 1):
-                    found.append(entry)
-
-        found.sort(key=functools.cmp_to_key(lambda a, b: self._compare_entries(a[1].lower(), b[1].lower(), lpart)))
-
-        if lpart == '..':
-            newdirs.append(d.get_parent())
-
-        for dd in newdirs:
-            found.extend(self.do_search_dir(parts[1:], dd))
-
-        return found
-
     def _replace_insensitive(self, s, find, rep):
         out = ''
         l = s.lower()
@@ -251,14 +160,6 @@ class Popup(Gtk.Dialog):
         return out + xml.sax.saxutils.escape(s[last:])
 
 
-    def make_markup(self, parts, path):
-        out = []
-
-        for i in range(0, len(parts)):
-            out.append(self._replace_insensitive(path[i], parts[i], "<b>%s</b>"))
-
-        return os.sep.join(out)
-
     def _get_icon(self, f):
         query = f.query_info(Gio.FILE_ATTRIBUTE_STANDARD_ICON,
                              Gio.FileQueryInfoFlags.NONE,
@@ -269,39 +170,6 @@ class Popup(Gtk.Dialog):
         else:
             return query.get_icon()
 
-    def _make_parts(self, parent, child, pp):
-        parts = []
-
-        # We went from parent, to child, using pp
-        idx = len(pp) - 1
-
-        while idx >= 0:
-            if pp[idx] == '..':
-                parts.insert(0, '..')
-            else:
-                parts.insert(0, child.get_basename())
-                child = child.get_parent()
-
-            idx -= 1
-
-        return parts
-
-    def normalize_relative(self, parts):
-        if not parts:
-            return []
-
-        out = self.normalize_relative(parts[:-1])
-
-        if parts[-1] == '..':
-            if not out or (out[-1] == '..') or len(out) == 1:
-                out.append('..')
-            else:
-                del out[-1]
-        else:
-            out.append(parts[-1])
-
-        return out
-
     def _append_to_store(self, item):
         if item not in self._stored_items:
             self._store.append(item)
@@ -311,13 +179,6 @@ class Popup(Gtk.Dialog):
         self._store.clear()
         self._stored_items = {}
 
-    def _set_busy(self, busy):
-        if busy:
-            self.get_window().set_cursor(self._busy_cursor)
-        else:
-            self.get_window().set_cursor(None)
-        Gdk.flush()
-
     def _remove_cursor(self):
         if self._cursor:
             path = self._cursor.get_path()
@@ -326,28 +187,19 @@ class Popup(Gtk.Dialog):
             self._store.row_changed(path, self._store.get_iter(path))
 
     def do_search(self):
-        self._set_busy(True)
         self._remove_cursor()
 
         text = self._entry.get_text().strip()
         self._clear_store()
 
-        if text == '':
-            pass #self._show_virtuals()
-        else:
-            parts = self.normalize_relative(text.split(os.sep))
-            files = []
-
-            for d in self._dirs:
-                for entry in self.do_search_dir(parts, d):
-                    pathparts = self._make_parts(d, entry[0], parts)
-                    self._append_to_store((entry[3], self.make_markup(parts, pathparts), entry[0], entry[2]))
-
+        for provider in self.manager.get_providers():
+            for p in provider.get_proposals():
+                #TODO Search and appent to store
+                self._append_to_store((None, p, None))
+                
         piter = self._store.get_iter_first()
         if piter:
             self._treeview.get_selection().select_path(self._store.get_path(piter))
-
-        self._set_busy(False)
 
     #FIXME: override doesn't work anymore for some reason, if we override
     # the widget is not realized
@@ -361,7 +213,6 @@ class Popup(Gtk.Dialog):
 
     def on_changed(self, editable):
         self.do_search()
-        self.on_selection_changed(self._treeview.get_selection())
 
     def _shift_extend(self, towhere):
         selection = self._treeview.get_selection()
@@ -377,72 +228,12 @@ class Popup(Gtk.Dialog):
         selection.unselect_all()
         selection.select_range(start, towhere)
 
-    def _select_index(self, idx, hasctrl, hasshift):
+    def _select_index(self, idx):
         path = (idx,)
-
-        if not (hasctrl or hasshift):
-            self._treeview.get_selection().unselect_all()
-
-        if hasshift:
-            self._shift_extend(path)
-        else:
-            self._shift_start = None
-
-            if not hasctrl:
-                self._treeview.get_selection().select_path(path)
+        self._treeview.get_selection().select_path(path)
 
         self._treeview.scroll_to_cell(path, None, True, 0.5, 0)
         self._remove_cursor()
-
-        if hasctrl or hasshift:
-            self._cursor = Gtk.TreeRowReference(self._store, path)
-
-            piter = self._store.get_iter(path)
-            self._store.row_changed(path, piter)
-
-    def _move_selection(self, howmany, hasctrl, hasshift):
-        num = self._store.iter_n_children(None)
-
-        if num == 0:
-            return True
-
-        # Test for cursor
-        path = None
-
-        if self._cursor:
-            path = self._cursor.get_path()
-        else:
-            model, rows = self._treeview.get_selection().get_selected_rows()
-
-            if len(rows) == 1:
-                path = rows[0]
-
-        if not path:
-            if howmany > 0:
-                self._select_index(0, hasctrl, hasshift)
-            else:
-                self._select_index(num - 1, hasctrl, hasshift)
-        else:
-            idx = path.get_indices()[0]
-
-            if idx + howmany < 0:
-                self._select_index(0, hasctrl, hasshift)
-            elif idx + howmany >= num:
-                self._select_index(num - 1, hasctrl, hasshift)
-            else:
-                self._select_index(idx + howmany, hasctrl, hasshift)
-
-        return True
-
-    def _direct_file(self):
-        uri = self._entry.get_text()
-        gfile = Gio.file_new_for_uri(uri)
-
-        if Gedit.utils_is_valid_location(gfile) or \
-           (os.path.isabs(uri) and gfile.query_exists()):
-            return gfile
-        else:
-            return None
 
     def _activate(self):
         model, rows = self._treeview.get_selection().get_selected_rows()
@@ -469,17 +260,7 @@ class Popup(Gtk.Dialog):
         if rows and ret:
             self.destroy()
 
-        if not rows:
-            gfile = self._direct_file()
-
-            if gfile and self._handler(gfile):
-                self.destroy()
-            else:
-                ret = False
-        else:
-            ret = False
-
-        return ret
+        return False
 
     def toggle_cursor(self):
         if not self._cursor:
@@ -526,28 +307,6 @@ class Popup(Gtk.Dialog):
             self._size = (alloc.width, alloc.height)
 
         return Gtk.Dialog.do_configure_event(self, event)
-
-    def on_selection_changed(self, selection):
-        model, rows = selection.get_selected_rows()
-
-        gfile = None
-        fname = None
-
-        if not rows:
-            gfile = self._direct_file()
-        elif len(rows) == 1:
-            gfile = model.get(model.get_iter(rows[0]), 2)[0]
-        else:
-            fname = ''
-
-        if gfile:
-            if gfile.is_native():
-                fname = xml.sax.saxutils.escape(gfile.get_path())
-            else:
-                fname = xml.sax.saxutils.escape(gfile.get_uri())
-
-        self._open_button.set_sensitive(fname != None)
-        self._info_label.set_markup(fname or '')
 
     def on_focus_entry(self, group, accel, keyval, modifier):
         self._entry.grab_focus()

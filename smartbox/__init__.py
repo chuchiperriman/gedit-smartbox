@@ -1,5 +1,33 @@
+# -*- coding: utf-8 -*-
+
+#    Gedit smartbox plugin
+#    Copyright (C) 2011  Jesús Barbero Rodríguez <chuchiperriman@gmail.com>
+#
+#    This program is free software; you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation; either version 2 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program; if not, write to the Free Software
+#    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+
 from gi.repository import GObject, Gtk, Gedit
+from .core import Singleton
 from .popup import Popup
+from .currentdocsprovider import CurrentDocsProvider
+
+class Message(Gedit.Message):
+    view = GObject.property(type=Gedit.View)
+    iter = GObject.property(type=Gtk.TextIter)
+
+class Activate(Message):
+    trigger = GObject.property(type=str)
 
 class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
     __gtype_name__ = "SmartBoxPlugin"
@@ -9,14 +37,21 @@ class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
         GObject.Object.__init__(self)
     
     def do_activate(self):
-        self.manager = SmartBoxManager.get_instance()
+        self.manager = SmartBoxManager()
         self.timeout_id = GObject.timeout_add(5000, self.on_timeout, None)
         
+        self.register_messages()
         self.insert_menu()
         
         self._popup = None
+        
+        self.current_docs_provider = CurrentDocsProvider()
+        self.manager.add_provider(self.current_docs_provider)
 
     def do_deactivate(self):
+        
+        self.manager.remove_provider(self.current_docs_provider)
+        self.unregister_messages()
         self.remove_menu()
 
     def do_update_state(self):
@@ -26,11 +61,13 @@ class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
         print '*' * 50
         for p in self.manager.providers:
             print p.get_name()
+            for r in p.get_proposals():
+                print r
             
         return True
         
     def _create_popup(self):
-        self._popup = Popup(self.window)
+        self._popup = Popup(self.window, self.manager)
         self.window.get_group().add_window(self._popup)
 
         self._popup.set_default_size(*(450, 300))
@@ -39,7 +76,7 @@ class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
         self._popup.connect('destroy', self.on_popup_destroy)
         
     def insert_menu(self):
-        manager = self.window.get_ui_manager()
+        uimanager = self.window.get_ui_manager()
 
         self.action_group = Gtk.ActionGroup("GeditSmartBoxPluginActions")
         self.action_group.set_translation_domain('gedit')
@@ -48,16 +85,33 @@ class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
                         '<Primary><Alt>p', 'Open Smart Box', \
                         self.on_action_open_activate)])
 
-        self.merge_id = manager.new_merge_id()
-        manager.insert_action_group(self.action_group, -1)
-        manager.add_ui(self.merge_id, '/MenuBar/ToolsMenu/ToolsOps_5', \
+        self.merge_id = uimanager.new_merge_id()
+        uimanager.insert_action_group(self.action_group, -1)
+        uimanager.add_ui(self.merge_id, '/MenuBar/ToolsMenu/ToolsOps_5', \
                         'OpenBox', 'OpenBox', Gtk.UIManagerItemType.MENUITEM, False)
                         
     def remove_menu(self):
-        manager = self.window.get_ui_manager()
-        manager.remove_ui(self.merge_id)
-        manager.remove_action_group(self.action_group)
+        uimanager = self.window.get_ui_manager()
+        uimanager.remove_ui(self.merge_id)
+        uimanager.remove_action_group(self.action_group)
         self.action_group = None
+        
+    def register_messages(self):
+        bus = self.window.get_message_bus()
+
+        bus.register(Activate, '/plugins/smartbox', 'activate')
+
+        self.signal_ids = set()
+
+        sid = bus.connect('/plugins/smartbox', 'activate', self.on_message_activate, None)
+        self.signal_ids.add(sid)
+
+    def unregister_messages(self):
+        bus = self.window.get_message_bus()
+        for sid in self.signal_ids:
+            bus.disconnect(sid)
+        signal_ids = None
+        bus.unregister_all('/plugins/smartbox')
                 
     def on_action_open_activate(self, action):
         self.on_timeout()
@@ -70,50 +124,34 @@ class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
     def on_popup_destroy(self, popup, user_data=None):
         self._popup = None
         
-class Singleton:
-    """
-    A non-thread-safe helper class to ease implementing singletons.
-    This should be used as a decorator -- not a metaclass -- to the
-    class that should be a singleton.
+    def on_message_activate(self, bus, message, userdata):
+        
+        view = message.props.view
 
-    The decorated class can define one `__init__` function that
-    takes only the `self` argument. Other than that, there are
-    no restrictions that apply to the decorated class.
+        if not view:
+            view = self.window.get_active_view()
 
-    To get the singleton instance, use the `Instance` method. Trying
-    to use `__call__` will result in a `TypeError` being raised.
-
-    Limitations: The decorated class cannot be inherited from.
-
-    """
-
-    def __init__(self, decorated):
-        self._decorated = decorated
-
-    def get_instance(self):
+        print 'mensaje recibido'
+        
         """
-        Returns the singleton instance. Upon its first call, it creates a
-        new instance of the decorated class and calls its `__init__` method.
-        On all subsequent calls, the already created instance is returned.
+        iter = message.props.iter
 
+        if not iter:
+            iter = view.get_buffer().get_iter_at_mark(view.get_buffer().get_insert())
         """
-        try:
-            return self._instance
-        except AttributeError:
-            self._instance = self._decorated()
-            return self._instance
 
-    def __call__(self):
-        raise TypeError('Singletons must be accessed through `get_instance()`.')
-
-    def __instancecheck__(self, inst):
-        return isinstance(inst, self._decorated)
-
-@Singleton
 class SmartBoxManager(object):
+    
+    __metaclass__ = Singleton
     
     def __init__(self):
         self.providers = []
         
     def add_provider(self, provider):
-        self.providers.append(provider)       
+        self.providers.append(provider)
+        
+    def remove_provider(self, provider):
+        self.providers.remove(provider)
+        
+    def get_providers(self):
+        return self.providers
