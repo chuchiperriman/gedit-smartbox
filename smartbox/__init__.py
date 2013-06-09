@@ -32,7 +32,7 @@ class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
         self.action_group.set_translation_domain('gedit')
         self.action_group.add_actions([('OpenBox', None,
                         'Open Smart _Box...', \
-                        None, 'Open Smart Box', \
+                        '<Primary><Alt>p', 'Open Smart Box', \
                         self.on_action_open_activate)])
 
         self.merge_id = manager.new_merge_id()
