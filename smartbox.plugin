@@ -1,0 +1,9 @@
+[Plugin]
+Loader=python
+Module=smartbox
+IAge=3
+Name=Smart Box
+Description=Smart box to access commands easily
+Authors=Jesús Barbero Rodríguez <chuchiperriman@gmail.com>
+Copyright=Copyright © 2013 Jesús Barbero Rodríguez
+Version=3.0.0
