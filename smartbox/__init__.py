@@ -1,4 +1,5 @@
 from gi.repository import GObject, Gtk, Gedit
+from .popup import Popup
 
 class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
     __gtype_name__ = "SmartBoxPlugin"
@@ -12,6 +13,8 @@ class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
         self.timeout_id = GObject.timeout_add(5000, self.on_timeout, None)
         
         self.insert_menu()
+        
+        self._popup = None
 
     def do_deactivate(self):
         self.remove_menu()
@@ -23,7 +26,17 @@ class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
         print '*' * 50
         for p in self.manager.providers:
             print p.get_name()
+            
         return True
+        
+    def _create_popup(self):
+        self._popup = Popup(self.window)
+        self.window.get_group().add_window(self._popup)
+
+        self._popup.set_default_size(*(450, 300))
+        self._popup.set_transient_for(self.window)
+        self._popup.set_position(Gtk.WindowPosition.CENTER_ON_PARENT)
+        self._popup.connect('destroy', self.on_popup_destroy)
         
     def insert_menu(self):
         manager = self.window.get_ui_manager()
@@ -48,6 +61,14 @@ class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
                 
     def on_action_open_activate(self, action):
         self.on_timeout()
+        
+        if not self._popup:
+            self._create_popup()
+            
+        self._popup.show()
+        
+    def on_popup_destroy(self, popup, user_data=None):
+        self._popup = None
         
 class Singleton:
     """
