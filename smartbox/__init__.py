@@ -45,7 +45,7 @@ class SmartBoxPlugin(GObject.Object, Gedit.WindowActivatable):
         
         self._popup = None
         
-        self.current_docs_provider = CurrentDocsProvider()
+        self.current_docs_provider = CurrentDocsProvider(self.window)
         self.manager.add_provider(self.current_docs_provider)
 
     def do_deactivate(self):

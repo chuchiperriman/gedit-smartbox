@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 #    Gedit smartbox plugin
-#    Copyright (C) 2011  Jesús Barbero Rodríguez <chuchiperriman@gmail.com>
+#    Copyright (C) 2013  Jesús Barbero Rodríguez <chuchiperriman@gmail.com>
 #
 #    This program is free software; you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -34,6 +34,7 @@ class Popup(Gtk.Dialog):
                     buttons=None)
 
         self.manager = manager
+        self.proposals = dict()
         
         self._build_ui()
 
@@ -71,7 +72,7 @@ class Popup(Gtk.Dialog):
         tv = Gtk.TreeView()
         tv.set_headers_visible(False)
 
-        self._store = Gtk.ListStore(Gio.Icon, str, GObject.Object)
+        self._store = Gtk.ListStore(Gio.Icon, str, int)
         tv.set_model(self._store)
 
         self._treeview = tv
@@ -192,10 +193,13 @@ class Popup(Gtk.Dialog):
         text = self._entry.get_text().strip()
         self._clear_store()
 
+        self.proposals.clear()
+        
         for provider in self.manager.get_providers():
             for p in provider.get_proposals():
                 #TODO Search and appent to store
-                self._append_to_store((None, p, None))
+                self.proposals[id(p)] = p
+                self._append_to_store((None, p.get_title(), id(p)))
                 
         piter = self._store.get_iter_first()
         if piter:
@@ -236,29 +240,17 @@ class Popup(Gtk.Dialog):
         self._remove_cursor()
 
     def _activate(self):
+        print 'activate'
         model, rows = self._treeview.get_selection().get_selected_rows()
         ret = True
 
         for row in rows:
             s = model.get_iter(row)
-            info = model.get(s, 2, 3)
+            proposals_id = model.get_value(s, 2)
 
-            if info[1] != Gio.FileType.DIRECTORY:
-                ret = ret and self._handler(info[0])
-            else:
-                text = self._entry.get_text()
-
-                for i in range(len(text) - 1, -1, -1):
-                    if text[i] == os.sep:
-                        break
-
-                self._entry.set_text(os.path.join(text[:i], os.path.basename(info[0].get_uri())) + os.sep)
-                self._entry.set_position(-1)
-                self._entry.grab_focus()
-                return True
-
-        if rows and ret:
-            self.destroy()
+            self.proposals[proposals_id].activate()
+            
+        self.destroy()
 
         return False
 

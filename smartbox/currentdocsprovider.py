@@ -17,14 +17,40 @@
 #    along with this program; if not, write to the Free Software
 #    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
+class Proposal(object):
+
+    def __init__(self, title, description):
+        self.title = title
+        self.description = description
+        
+    def get_title(self):
+        return self.title
+        
+    def get_description(self):
+        return self.description
+
+class CloseAllProposal(Proposal):        
+    
+    def __init__(self, window):
+        super(CloseAllProposal, self).__init__('Close all documents', '')
+        self.window = window
+        
+    def activate(self):
+        print 'close all tabs'
+        self.window.close_all_tabs()
+
+
 class CurrentDocsProvider(object):
     
+    def __init__(self, window):
+        self.window = window
     
     def get_name(self):
         return "Current documents utilities"
         
     def get_proposals(self):
-        return ['Close all documents','Close current document']
+        return [CloseAllProposal(self.window),
+                Proposal('Close current document','')]
 
 
 

@@ -1,10 +1,1 @@
-import smartbox
-
-class Test:
-    def get_name(self):
-        return "Test"
-
-m = smartbox.SmartBoxManager.get_instance()
-m.add_provider(Test())
-
-
+* Ask if really want to close if there are unsaved documents
