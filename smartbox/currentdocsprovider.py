@@ -29,6 +29,7 @@ class Proposal(object):
     def get_description(self):
         return self.description
 
+
 class CloseAllProposal(Proposal):        
     
     def __init__(self, window):
@@ -36,8 +37,17 @@ class CloseAllProposal(Proposal):
         self.window = window
         
     def activate(self):
-        print 'close all tabs'
         self.window.close_all_tabs()
+        
+
+class CloseCurrentProposal(Proposal):        
+    
+    def __init__(self, window):
+        super(CloseCurrentProposal, self).__init__('Close the current document', '')
+        self.window = window
+        
+    def activate(self):
+        self.window.close_tab(self.window.get_active_tab())
 
 
 class CurrentDocsProvider(object):
@@ -50,7 +60,7 @@ class CurrentDocsProvider(object):
         
     def get_proposals(self):
         return [CloseAllProposal(self.window),
-                Proposal('Close current document','')]
+                CloseCurrentProposal(self.window)]
 
 
 
